@@ -198,7 +198,7 @@ PAGINA = r"""
 <body>
 <div class="wrap">
   <h1>Conversor TXT &rarr; CSV Correios</h1>
-  <p class="sub">Selecione a pasta do dia (com as pastas dos modelos: 2B1, 5B, 8C1...) e baixe os CSVs prontos.</p>
+  <p class="sub">Selecione a pasta do dia e baixe os CSVs prontos.</p>
 
   <div class="card">
     <div class="tabs">
@@ -209,7 +209,7 @@ PAGINA = r"""
     <div id="panePasta" class="pane on">
       <div class="drop" onclick="document.getElementById('inPasta').click()">
         <b>Clique para escolher a pasta do dia</b><br>
-        <span>(envia a pasta inteira; funciona no Chrome e no Edge)</span>
+        <span>(envia a pasta do dia inteira)</span>
       </div>
       <input id="inPasta" type="file" webkitdirectory directory multiple onchange="infoPasta()">
       <div id="infoPasta" class="fileinfo"></div>
@@ -219,7 +219,7 @@ PAGINA = r"""
       <div id="dropZip" class="drop"
            onclick="document.getElementById('inZip').click()">
         <b>Clique ou arraste o .zip da pasta do dia</b><br>
-        <span>(funciona em qualquer navegador)</span>
+        <span></span>
       </div>
       <input id="inZip" type="file" accept=".zip" onchange="infoZip()">
       <div id="infoZip" class="fileinfo"></div>
