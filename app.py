@@ -227,8 +227,8 @@ PAGINA = r"""
 
     <button id="btn" class="btn-main" onclick="gerar()">Gerar CSVs</button>
     <div class="nota">
-      Cada pasta de modelo vira um <b>&lt;modelo&gt;.csv</b>. Enderecos internacionais
-      detectados vao para um <b>&lt;modelo&gt;_INTERNACIONAL.csv</b> separado (conferencia manual).
+      Cada pasta de modelo vira um <b>&lt;modelo&gt;.csv</b>. Endereços internacionais
+      detectados vão para um <b>&lt;modelo&gt;_INTERNACIONAL.csv</b> separado.
     </div>
   </div>
 
