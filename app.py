@@ -20,6 +20,9 @@ import zipfile
 from flask import Flask, request, jsonify, render_template_string
 
 import txt_para_correios as conv
+import planilha_para_txt as planilha
+
+EXT_PLANILHA = ('.xls', '.xlsx')
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64 MB por envio
@@ -51,37 +54,67 @@ def nome_base_de_caminho(relpath):
     return partes[0] if partes else None
 
 
+def _modelo_de_planilha(rel):
+    """Para uma planilha, o nome do modelo vem do nome do arquivo (sem
+    extensao). Ex.: '8C1.xlsx' -> '8C1'. Se a planilha estiver dentro de uma
+    pasta de modelo (pasta/8C1/8C1.xlsx), usa a pasta-pai, igual ao .txt."""
+    partes = [p for p in (rel or '').replace('\\', '/').split('/')
+              if p and p != '.']
+    if not partes:
+        return None
+    if len(partes) >= 2 and partes[-2] != conv.NOME_PASTA_SAIDA:
+        return partes[-2]                       # pasta-pai, se houver
+    return os.path.splitext(partes[-1])[0]      # senao, nome do arquivo
+
+
 def coletar_de_arquivos(files):
-    """Modo 'pasta': lista de FileStorage cujos filenames sao caminhos relativos."""
+    """Modo 'pasta': lista de FileStorage cujos filenames sao caminhos relativos.
+    Aceita tanto .txt (fluxo antigo) quanto .xls/.xlsx (planilha SMT/SAC)."""
     modelos = {}
     nome_base = None
     for f in files:
         rel = f.filename or ''
-        if not rel.lower().endswith('.txt'):
-            continue
-        modelo = modelo_de_caminho(rel)
-        if not modelo:
+        low = rel.lower()
+        if low.endswith('.txt'):
+            modelo = modelo_de_caminho(rel)
+            if not modelo:
+                continue
+            texto = f.read().decode(ENCODING_TXT, errors='replace')
+        elif low.endswith(EXT_PLANILHA):
+            modelo = _modelo_de_planilha(rel)
+            if not modelo:
+                continue
+            texto = planilha.ler_planilha_bytes(f.read(), rel)
+        else:
             continue
         if nome_base is None:
             nome_base = nome_base_de_caminho(rel)
-        texto = f.read().decode(ENCODING_TXT, errors='replace')
         modelos.setdefault(modelo, []).append(texto)
     return modelos, nome_base
 
 
 def coletar_de_zip(file_zip):
-    """Modo '.zip': le os .txt de dentro do arquivo compactado."""
+    """Modo '.zip': le os .txt e/ou .xls/.xlsx de dentro do arquivo compactado."""
     modelos = {}
     nome_base = os.path.splitext(os.path.basename(file_zip.filename or 'saida'))[0]
     dados = file_zip.read()
     with zipfile.ZipFile(io.BytesIO(dados)) as z:
         for info in z.infolist():
-            if info.is_dir() or not info.filename.lower().endswith('.txt'):
+            if info.is_dir():
                 continue
-            modelo = modelo_de_caminho(info.filename)
-            if not modelo:
+            low = info.filename.lower()
+            if low.endswith('.txt'):
+                modelo = modelo_de_caminho(info.filename)
+                if not modelo:
+                    continue
+                texto = z.read(info).decode(ENCODING_TXT, errors='replace')
+            elif low.endswith(EXT_PLANILHA):
+                modelo = _modelo_de_planilha(info.filename)
+                if not modelo:
+                    continue
+                texto = planilha.ler_planilha_bytes(z.read(info), info.filename)
+            else:
                 continue
-            texto = z.read(info).decode(ENCODING_TXT, errors='replace')
             modelos.setdefault(modelo, []).append(texto)
     return modelos, nome_base
 
@@ -109,17 +142,28 @@ def gerar():
     try:
         files = request.files.getlist('arquivos')
         zip_in = request.files.get('zip')
+        planilha_in = request.files.get('planilha')
 
-        if files and any((f.filename or '').lower().endswith('.txt') for f in files):
+        tem_arquivo = files and any(
+            (f.filename or '').lower().endswith(('.txt',) + EXT_PLANILHA)
+            for f in files)
+
+        if planilha_in and planilha_in.filename:
+            rel = planilha_in.filename
+            modelo = _modelo_de_planilha(rel)
+            texto = planilha.ler_planilha_bytes(planilha_in.read(), rel)
+            modelos = {modelo: [texto]}
+            nome_base = os.path.splitext(os.path.basename(rel))[0]
+        elif tem_arquivo:
             modelos, nome_base = coletar_de_arquivos(files)
         elif zip_in and zip_in.filename:
             modelos, nome_base = coletar_de_zip(zip_in)
         else:
-            return jsonify({'ok': False, 'erro': 'Nenhum arquivo .txt recebido.'})
+            return jsonify({'ok': False, 'erro': 'Nenhum arquivo recebido.'})
 
         if not modelos:
             return jsonify({'ok': False, 'erro':
-                            'Nao encontrei .txt dentro de pastas de modelo.'})
+                            'Nao encontrei .txt nem planilha valida.'})
 
         res = conv.converter_textos(modelos)
         if not res['arquivos']:
@@ -204,6 +248,7 @@ PAGINA = r"""
     <div class="tabs">
       <div id="tabPasta" class="tab on" onclick="setTab('pasta')">Selecionar pasta</div>
       <div id="tabZip"   class="tab"    onclick="setTab('zip')">Enviar .zip</div>
+      <div id="tabPlan"  class="tab"    onclick="setTab('plan')">Enviar planilha</div>
     </div>
 
     <div id="panePasta" class="pane on">
@@ -225,6 +270,16 @@ PAGINA = r"""
       <div id="infoZip" class="fileinfo"></div>
     </div>
 
+    <div id="panePlan" class="pane">
+      <div id="dropPlan" class="drop"
+           onclick="document.getElementById('inPlan').click()">
+        <b>Clique ou arraste a planilha (.xls / .xlsx)</b><br>
+        <span>L&ecirc; a aba <b>INSIRA OS DADOS</b>. O nome do modelo vem do nome do arquivo.</span>
+      </div>
+      <input id="inPlan" type="file" accept=".xls,.xlsx" onchange="infoPlan()">
+      <div id="infoPlan" class="fileinfo"></div>
+    </div>
+
     <button id="btn" class="btn-main" onclick="gerar()">Gerar CSVs</button>
     <div class="nota">
       Cada pasta de modelo vira um <b>&lt;modelo&gt;.csv</b>. Endereços internacionais
@@ -241,8 +296,14 @@ function setTab(t){
   aba = t;
   document.getElementById('tabPasta').classList.toggle('on', t==='pasta');
   document.getElementById('tabZip').classList.toggle('on', t==='zip');
+  document.getElementById('tabPlan').classList.toggle('on', t==='plan');
   document.getElementById('panePasta').classList.toggle('on', t==='pasta');
   document.getElementById('paneZip').classList.toggle('on', t==='zip');
+  document.getElementById('panePlan').classList.toggle('on', t==='plan');
+}
+function infoPlan(){
+  const f = document.getElementById('inPlan').files[0];
+  document.getElementById('infoPlan').textContent = f ? ('Selecionado: '+f.name) : '';
 }
 function infoPasta(){
   const fs = [...document.getElementById('inPasta').files].filter(f=>f.name.toLowerCase().endsWith('.txt'));
@@ -257,6 +318,12 @@ const dz = document.getElementById('dropZip');
 ['dragover','dragenter'].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();dz.classList.add('hover');}));
 ['dragleave','drop'].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();dz.classList.remove('hover');}));
 dz.addEventListener('drop',ev=>{ const f=ev.dataTransfer.files[0]; if(f){ document.getElementById('inZip').files=ev.dataTransfer.files; infoZip(); }});
+
+// drag and drop da planilha
+const dp = document.getElementById('dropPlan');
+['dragover','dragenter'].forEach(e=>dp.addEventListener(e,ev=>{ev.preventDefault();dp.classList.add('hover');}));
+['dragleave','drop'].forEach(e=>dp.addEventListener(e,ev=>{ev.preventDefault();dp.classList.remove('hover');}));
+dp.addEventListener('drop',ev=>{ const f=ev.dataTransfer.files[0]; if(f){ document.getElementById('inPlan').files=ev.dataTransfer.files; infoPlan(); }});
 
 function b64ToBlob(b64){
   const bin = atob(b64); const arr = new Uint8Array(bin.length);
@@ -275,10 +342,14 @@ async function gerar(){
     const fs = [...document.getElementById('inPasta').files].filter(f=>f.name.toLowerCase().endsWith('.txt'));
     if(!fs.length){ alert('Selecione a pasta do dia.'); return; }
     fs.forEach(f=> fd.append('arquivos', f, f.webkitRelativePath || f.name));
-  } else {
+  } else if(aba==='zip') {
     const f = document.getElementById('inZip').files[0];
     if(!f){ alert('Selecione o arquivo .zip.'); return; }
     fd.append('zip', f);
+  } else {
+    const f = document.getElementById('inPlan').files[0];
+    if(!f){ alert('Selecione a planilha (.xls ou .xlsx).'); return; }
+    fd.append('planilha', f);
   }
 
   const box = document.getElementById('resultado');

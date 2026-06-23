@@ -293,19 +293,26 @@ def converter_pasta(pasta_dia):
     if not os.path.isdir(pasta_dia):
         raise ValueError("Pasta nao encontrada: {}".format(pasta_dia))
 
-    # Le todos os .txt agrupados por pasta de modelo
+    # Le todos os .txt e planilhas agrupados por pasta de modelo
     modelos = {}
     for nome_item in sorted(os.listdir(pasta_dia)):
         sub = os.path.join(pasta_dia, nome_item)
         if not os.path.isdir(sub) or nome_item == NOME_PASTA_SAIDA:
             continue
-        txts = glob.glob(os.path.join(sub, '*.txt'))
-        if not txts:
-            continue
         textos = []
-        for txt in txts:
+        for txt in glob.glob(os.path.join(sub, '*.txt')):
             with open(txt, 'r', encoding=ENCODING, errors='replace') as f:
                 textos.append(f.read())
+        # planilhas .xls/.xlsx na mesma pasta de modelo
+        planilhas = (glob.glob(os.path.join(sub, '*.xls'))
+                     + glob.glob(os.path.join(sub, '*.xlsx')))
+        if planilhas:
+            import planilha_para_txt as _pl
+            for caminho in planilhas:
+                with open(caminho, 'rb') as f:
+                    textos.append(_pl.ler_planilha_bytes(f.read(), caminho))
+        if not textos:
+            continue
         modelos[nome_item] = textos
 
     res = converter_textos(modelos)
