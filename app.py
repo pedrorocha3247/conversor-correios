@@ -120,7 +120,7 @@ def coletar_de_zip(file_zip):
 
 
 def montar_zip(arquivos):
-    """arquivos: {nome_csv: bytes} -> bytes de um .zip."""
+    """arquivos: {nome: bytes} -> bytes de um .zip."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
         for nome, dados in arquivos.items():
@@ -170,7 +170,7 @@ def gerar():
             return jsonify({'ok': False, 'erro': 'Nenhum registro valido encontrado.'})
 
         zip_bytes = montar_zip(res['arquivos'])
-        nome_zip = (nome_base or 'saida') + '_CSV.zip'
+        nome_zip = (nome_base or 'saida') + '.zip'
 
         return jsonify({
             'ok': True,
